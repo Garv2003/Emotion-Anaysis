@@ -1,54 +1,31 @@
-from tensorflow.keras.preprocessing.text import Tokenizer
-import numpy as np
-from tensorflow.keras.models import load_model
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from flask import Flask, render_template, request
-
-from nltk.stem import SnowballStemmer
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 import re
-import json
-import h5py
-from tensorflow.keras.models import model_from_json
-# import os
-# os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+import pickle
+import os
+import tensorflow as tf
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
+from flask import Flask, render_template, request
+from tensorflow.keras.models import load_model
+import numpy as np
 
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+nltk.download('punkt')
+nltk.download('stopwords')
 
 app = Flask(__name__)
 
 
-# def load_my_model(model_path):
-#     try:
-#         model = load_model(model_path)
-#         print("Model loaded successfully!")
-#         return model
-#     except OSError as e:
-#         print(f"Error loading model: {e}")
-#         return None
-
-def load_model_without_time_major(h5_path):
-    with h5py.File(h5_path, 'r') as f:
-        model_config = f.attrs.get('model_config')
-        if model_config:
-            model_config = json.loads(model_config.encode('utf-8'))
-            for layer in model_config['config']['layers']:
-                if 'time_major' in layer['config']:
-                    del layer['config']['time_major']
-            model = model_from_json(json.dumps(
-                model_config), custom_objects=custom_objects)
-            model.load_weights(h5_path)
-            return model
-        else:
-            raise ValueError("No model configuration found in .h5 file")
-
-
-custom_objects = {
-    'Sequential': Sequential,
-}
-
-model = load_model_without_time_major('Sentimental_analysis.h5')
+def load_my_model(model_path):
+    try:
+        model = load_model(model_path)
+        print("Model loaded successfully!")
+        return model
+    except OSError as e:
+        print(f"Error loading model: {e}")
+        return None
 
 
 def clean(text):
@@ -90,7 +67,15 @@ def clean_text(text):
     return text
 
 
-# model = load_my_model('Sentimental_analysis.h5')
+model = load_my_model("./model/Emotion_Analysis_Model.keras")
+
+if model is None:
+    print("Model failed to load. Exiting.")
+    exit(1)
+
+with open('./model/Emotion_Analysis_Tokenizer.pkl', 'rb') as tokenizer_file:
+    tokenizer = pickle.load(tokenizer_file)
+
 max_sequence_length = 100
 
 
@@ -101,32 +86,23 @@ def home():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-
     if request.form['user_input'] == '':
         return "<p id='prediction' class='flex items-center justify-center w-96 p-4 mt-4 bg-white shadow-md rounded-lg text-red-800 font-bold'>Please enter a valid input</p>"
 
     try:
         user_input = request.form['user_input']
         user_input = clean_text(user_input)
-        tokenizer = Tokenizer()
         user_sequences = tokenizer.texts_to_sequences([user_input])
         user_padded = tf.keras.preprocessing.sequence.pad_sequences(
             user_sequences, maxlen=max_sequence_length)
-        class_mapping = {
-            0: 'Negative',
-            1: 'Neutral',
-            2: 'Positive'
-        }
         user_predictions = model.predict(user_padded)
-        print(user_predictions)
-        user_pred_classes = np.argmax(user_predictions, axis=1)
-        print(user_pred_classes)
-        print(f'Predicted Class: {class_mapping[user_pred_classes[0]]}')
-        return "<p id='prediction' class='flex items-center justify-center w-96 p-4 mt-4 bg-white shadow-md rounded-lg text-gray-800 font-bold'>" + class_mapping[user_pred_classes[0]].capitalize() + "</p>"
+        class_mapping = {0: 'Fear', 1: 'Anger', 2: 'Joy'}
+        output = class_mapping[np.argmax(user_predictions)]
+        return "<p id='prediction' class='flex items-center justify-center w-96 p-4 mt-4 bg-white shadow-md rounded-lg text-gray-800 font-bold'>" + output + "</p>"
 
     except Exception as e:
-        print(f"Error predicting image: {e}")
-        return "<p id='prediction' class='flex items-center justify-center w-96 p-4 mt-4 bg-white shadow-md rounded-lg text-red-800 font-bold'>Error predicting image please try again</p>"
+        print(f"Error predicting input: {e}")
+        return "<p id='prediction' class='flex items-center justify-center w-96 p-4 mt-4 bg-white shadow-md rounded-lg text-red-800 font-bold'>Error analyzing the input</p>"
 
 
 if __name__ == '__main__':
